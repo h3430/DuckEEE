@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32_Rover_Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="assets/nipplejs.min.js"></script>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+  <div class="main">
+    <div class="container">
+  <div class="panel left">
+      <div class="header">
+     <h1>ESP32_Rover_Control</h1>
+  </div>
+    <div class="joystick_wrapper">
+      <div id="joystickZone"></div>
+    </div>
+      
+  </div>
+  <div class="panel right">
+   
+    <div class="data">
+       <div class="controls">
+        <button class="button" id="Reset_Button" onclick="resetTable()" >Reset!</button>
+        <button class="button" id="Read_Button" onclick="readButton()" >Read!</button>
+    </div>
+      <table id="Data_table"> 
+        <thead>
+          <tr>
+            <th>Radio</th>
+            <th>Infrared</th>
+            <th>Magnet</th>
+            <th>Species?</th>
+            <th>Ultrasound(name)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+  </div>
+
+ 
+
+
+
+
+  
+
+
+  <script>  
+    function readButton(){
+     
+      fetch('/read_data')
+        .then(response => response.text())
+        .then(queryString => {
+          const params = new URLSearchParams(queryString);
+
+          const radio = params.get('radio');
+          const infared = params.get('infared');
+          const magnetic = params.get('magnetic');
+          const species = params.get('species');
+          const name = params.get('name')
+
+          console.log('Radio:', radio);
+          console.log('Infared:', infared);
+          console.log('Magnetic:', magnetic);
+          console.log('Species:', species);
+          console.log('Name:', name)
+
+          const table = document.querySelector("#Data_table tbody");
+          const row = document.createElement("tr");
+
+          row.innerHTML = `
+          <td>${radio}</td>
+          <td>${infared}</td>
+          <td>${magnetic}</td>
+          <td>${species}</td>
+          <td>${name}</td>
+        `;
+
+           table.prepend(row);
+           console.log('Table row added!')
+
+      })
+        .catch(error => {
+          console.error('Error:', error);
+        });
+    }
+    function resetTable() {
+      const tbody = document.querySelector("#Data_table tbody");
+      tbody.innerHTML = ''; // Removes all rows in tbody
+      console.log('Table reset!');
+    }
+
+
+    
+    const joystick = nipplejs.create({
+      zone: document.getElementById('joystickZone'),
+      mode: 'static',
+      position: { left: '50%', top: '50%' },
+      color: '#ffcc00',
+      size: 300
+    });
+
+    joystick.on('move', function (evt, data) {
+      if (data && data.vector) {
+        const x = Math.round(data.vector.x * 255);
+        const y = Math.round(data.vector.y * 255);
+        // Send joystick data to ESP32
+        fetch(`/joystick?x=${x}&y=${y}`).catch(err => console.error(err))
+      }
+    });
+
+     joystick.on('end', function () {
+      const interval = setInterval(() => {
+        fetch('/joystick?x=0&y=0')
+          .then(res => res.text())
+          .then(text => {
+            console.log("Response:", text);
+            if (text.includes("stopped")) {
+              clearInterval(interval); // Exit loop
+            }
+          })
+          .catch(err => {
+            console.error("Fetch error:", err);
+            clearInterval(interval); // Exit on failure too
+          });
+      }, 
+      50); 
+    });
+  </script>
+</body>
+</html>
