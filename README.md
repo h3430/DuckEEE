@@ -3,8 +3,8 @@
 Code structure
 
 Code structure
-`
-EEE_Rover_Project/
+
+``EEE_Rover_Project/
 ├── .pio                   # 
 ├── .vsc        # Planning and designing resources
 ├── data
