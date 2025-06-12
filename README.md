@@ -3,7 +3,7 @@
 
 Code structure
 ```plaintext
-EEE_Rover_Project/
+DuckEEE/
 ├── .pio                
 ├── .vsc       
 ├── data
@@ -16,4 +16,5 @@ EEE_Rover_Project/
 ├── src
 │   ├── main.cpp      #contains arduino code
 ├── test
-└── platformio.ini
+├── platformio.ini
+└── README.md
