@@ -10,7 +10,7 @@ DuckEEE/
 │   ├──assets
 │   │   ├── nipple.min.js     # js package for joystick class
 │   │   ├── styles.css        # css styles
-│   ├── web_app.html       #html file for the web application
+│   ├── Joystick.html       #html file for the web application
 ├── include 
 ├── lib               
 ├── src
