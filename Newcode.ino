@@ -3,12 +3,9 @@
 #include <SPIFFS.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <vector>
 #include <driver/pcnt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/queue.h>
-#include <freertos/semphr.h>
 
 // Pinmap
 
@@ -16,18 +13,18 @@
 #define PWM_FREQ_MOTOR 5000
 #define PWM_RES_MOTOR 8
 #define MOTOR_CH0 0
-#define MOTOR_PIN0 25
+#define MOTOR_PIN0 20
 #define MOTOR_CH1 1
-#define MOTOR_PIN1 33
+#define MOTOR_PIN1 10
 #define MOTOR_CH2 2
-#define MOTOR_PIN2 27
+#define MOTOR_PIN2 7
 #define MOTOR_CH3 3
-#define MOTOR_PIN3 26
+#define MOTOR_PIN3 6
 
 // Sensors
-#define IR_INPUT_PIN 18
-#define RF_INPUT_PIN 23
-#define HALL_SENSOR_PIN 35
+#define IR_INPUT_PIN 0
+#define RF_INPUT_PIN 4
+#define HALL_SENSOR_PIN 1
 
 //  Pulsecounters
 #define IR_PULSECOUNTER PCNT_UNIT_0
@@ -53,24 +50,22 @@ const char *password = "12345678";
 // Server
 AsyncWebServer server(80);
 
-// Duck data
-std::vector<String> duck_names = {"Wibbo", "Gribbit", "Snorkle", "Zapple"};
-std::vector<int> duck_ir_freqs = {457, 0, 293, 0};
-std::vector<int> duck_rf_freqs = {0, 100, 0, 150};
-
 // Motor global vars
 int motor_x_val = 0;
 int motor_y_val = 0;
 
 // Global sensor data vars for web ui
-int hall = 0;
+String hallState = "N/A";
 float IR_freq = 0;
 float RF_freq = 0;
-String speciesName = "NULL";
-String ultrasonic_name1 = "NULL";
-String ultrasonic_name2 = "NULL";
+String speciesName = "N/A";
+String ultrasonic_name1 = "N/A";
+String ultrasonic_name2 = "N/A";
 
-// Setup was created by using https://github.com/pycom/pycom-esp-idf/blob/master/examples/peripherals/pcnt/main/pcnt_example_main.c to prompt Deepseek R1 Qwen distilled for examples.
+// Pulsecounter Setup was created by using https://github.com/pycom/pycom-esp-idf/blob/master/examples/peripherals/pcnt/main/pcnt_example_main.c
+// to prompt Deepseek R1 Qwen distilled for examples.
+// Model running on: https://t3.chat/.
+// Prompt and response are in the appendix.
 void setup_pcnt()
 {
   // IR pulsecounter
@@ -81,13 +76,11 @@ void setup_pcnt()
       .hctrl_mode = PCNT_MODE_KEEP,
       .pos_mode = PCNT_COUNT_INC,
       .neg_mode = PCNT_COUNT_DIS,
-      .counter_h_lim = 32767,
-      .counter_l_lim = -32768,
       .unit = IR_PULSECOUNTER,
       .channel = PCNT_CHANNEL_0,
   };
   pcnt_unit_config(&pcnt_config_ir);
-  pcnt_set_filter_value(IR_PULSECOUNTER, 10);
+  pcnt_set_filter_value(IR_PULSECOUNTER, 45);
   pcnt_filter_enable(IR_PULSECOUNTER);
 
   // RF pulsecounter
@@ -98,13 +91,11 @@ void setup_pcnt()
       .hctrl_mode = PCNT_MODE_KEEP,
       .pos_mode = PCNT_COUNT_INC,
       .neg_mode = PCNT_COUNT_DIS,
-      .counter_h_lim = 32767,
-      .counter_l_lim = -32768,
       .unit = RF_PULSECOUNTER,
       .channel = PCNT_CHANNEL_0,
   };
   pcnt_unit_config(&pcnt_config_rf);
-  pcnt_set_filter_value(RF_PULSECOUNTER, 10);
+  pcnt_set_filter_value(RF_PULSECOUNTER, 85);
   pcnt_filter_enable(RF_PULSECOUNTER);
 }
 
@@ -150,14 +141,14 @@ void motorTask(void *parameter)
       }
     }
     // Small delay to not oversaturate task
-    vTaskDelay(pdMS_TO_TICKS(MOTOR_DELAY));
+    vTaskDelay(MOTOR_DELAY / portTICK_PERIOD_MS);
   }
 }
 
 // get hall state and raw value
-String read_hall_value(int &hall_raw)
+String read_hall_value()
 {
-  hall_raw = analogRead(HALL_SENSOR_PIN);
+  int hall_raw = analogRead(HALL_SENSOR_PIN);
   String hall_state;
   if (hall_raw >= UPPER_THRESHOLD)
   {
@@ -179,15 +170,15 @@ String matchSpecies(int ir_freq, int rf_freq)
 {
 
   String match = "None";
-  bool ir_active = (ir_freq > 50);
-  bool rf_active = (rf_freq > 50);
-
+  bool ir_active = (ir_freq > 235 && ir_freq < 548);
+  bool rf_active = (rf_freq > 83 && rf_freq < 180);
+  int wibbo_delta = abs(ir_freq - 457);
+  int snorkle_delta = abs(ir_freq - 293);
+  int gribbit_diff = abs(rf_freq - 100);
+  int zapple_diff = abs(rf_freq - 150);
   // Match IR ducks
   if (ir_active && !rf_active)
   {
-    int wibbo_delta = abs(ir_freq - 457);
-    int snorkle_delta = abs(ir_freq - 293);
-
     if (wibbo_delta < snorkle_delta)
     {
       match = "Wibbo";
@@ -200,9 +191,6 @@ String matchSpecies(int ir_freq, int rf_freq)
   else if (!ir_active && rf_active)
   {
     // Match RF ducks
-    int gribbit_diff = abs(rf_freq - 100);
-    int zapple_diff = abs(rf_freq - 150);
-
     if (gribbit_diff < zapple_diff)
     {
       match = "Gribbit";
@@ -221,7 +209,8 @@ void sensor_task(void *parameter)
   while (1)
   {
     // Same as pulse counter initialization, Deepseek R1 Qwen distilled was used to explain and give examples for which functions needed to be called for the pulsecounter.
-    vTaskDelay(pdMS_TO_TICKS(SENSOR_POLL_TIME));
+    // Prompt and response is in the appendix
+    vTaskDelay(SENSOR_POLL_TIME / portTICK_PERIOD_MS);
 
     // Measure frequency
     pcnt_counter_clear(IR_PULSECOUNTER);
@@ -229,11 +218,12 @@ void sensor_task(void *parameter)
     pcnt_counter_resume(IR_PULSECOUNTER);
     pcnt_counter_resume(RF_PULSECOUNTER);
 
-    vTaskDelay(pdMS_TO_TICKS(FREQ_MEASURE_TIME));
+    vTaskDelay(FREQ_MEASURE_TIME / portTICK_PERIOD_MS);
 
     pcnt_counter_pause(IR_PULSECOUNTER);
     pcnt_counter_pause(RF_PULSECOUNTER);
 
+    // get values from pulsecounters
     int16_t ir_count, rf_count;
     pcnt_get_counter_value(IR_PULSECOUNTER, &ir_count);
     pcnt_get_counter_value(RF_PULSECOUNTER, &rf_count);
@@ -242,30 +232,30 @@ void sensor_task(void *parameter)
     float ir_freq = ir_count * FREQ_MULTIPLIER;
     float rf_freq = rf_count * FREQ_MULTIPLIER;
 
-    // get hall sensor value
-    int hall_raw = 0;
-    String hall_state = read_hall_value(hall_raw);
+    // match hall states and species
+    String hall_state_matched = read_hall_value();
+    String species_name_matched = matchSpecies(ir_freq, rf_freq);
 
-    // global var update
+    // atomic global var update
     IR_freq = ir_freq;
     RF_freq = rf_freq;
-    hall = hall_raw;
-
-    speciesName = "";
-    speciesName = matchSpecies(ir_freq, rf_freq);
+    hallState = hall_state_matched;
+    speciesName = species_name_matched;
   }
 }
 
 // Heavily referenced example by UKHeliBob: https://forum.arduino.cc/t/receive-string-from-serial-monitor/643266/2
+// Much more complex validation system can be used, but I don't see a point in overcomplicating a system
+// where you need to look at around 3 consectutive readings in the worst case to piece together what the actual name is...
 void uart_reading_task1(void *parameter)
 {
   String name = "";
 
   while (1)
   {
-    if (Serial2.available())
+    if (Serial.available())
     {
-      char c = Serial2.read();
+      char c = Serial.read();
       // wait for # and start reading next 3 chars
       if (c == '#')
       {
@@ -282,7 +272,7 @@ void uart_reading_task1(void *parameter)
       }
     }
     // delay to not oversaturate task
-    vTaskDelay(pdMS_TO_TICKS(UART_READ_DELAY_MS));
+    vTaskDelay(UART_READ_DELAY_MS / portTICK_PERIOD_MS);
   }
 }
 
@@ -292,9 +282,9 @@ void uart_reading_task2(void *parameter)
 
   while (1)
   {
-    if (Serial2.available())
+    if (Serial1.available())
     {
-      char c = Serial2.read();
+      char c = Serial1.read();
 
       // wait for # and start reading next 3 chars
       if (c == '#')
@@ -312,7 +302,7 @@ void uart_reading_task2(void *parameter)
       }
     }
     // delay to not oversaturate task
-    vTaskDelay(pdMS_TO_TICKS(UART_READ_DELAY_MS));
+    vTaskDelay(UART_READ_DELAY_MS / portTICK_PERIOD_MS);
   }
 }
 
@@ -334,15 +324,16 @@ void handleReadData(AsyncWebServerRequest *req)
 {
   String query_string = "radio=" + String(RF_freq) +
                         "&infared=" + String(IR_freq) +
-                        "&magnetic=" + String(hall) +
+                        "&magnetic=" + hallState +
                         "&species=" + speciesName +
-                        "&name=" + ultrasonic_name1 + ultrasonic_name2;
+                        "&name=" + ultrasonic_name1 + " " + ultrasonic_name2;
   req->send(200, "text/plain", query_string);
 }
 
 void setup()
 {
-  Serial.begin(115200);
+  // Set to max frequency of C3
+  setCpuFrequencyMhz(160);
   delay(1000);
 
   // motor setup
@@ -362,10 +353,12 @@ void setup()
 
   // esp32 hardware setup
   setup_pcnt();
-  Serial1.begin(600, SERIAL_8N1, 16);
-  Serial2.begin(600, SERIAL_8N1, 17);
 
-  // creating tasks
+  // Using both hardware serial interfaces
+  Serial1.begin(600, SERIAL_8N1, 16);
+  Serial.begin(600, SERIAL_8N1, 17);
+
+  // creating RTOS tasks
 
   xTaskCreate(
       motorTask,
@@ -385,7 +378,7 @@ void setup()
 
   xTaskCreate(
       uart_reading_task1,
-      "UART_read1",
+      "UART Read 1",
       4096,
       NULL,
       3,
@@ -393,7 +386,7 @@ void setup()
 
   xTaskCreate(
       uart_reading_task2,
-      "UART_read",
+      "UART Reat 2",
       4096,
       NULL,
       3,
@@ -404,7 +397,6 @@ void setup()
 
   // WIFI
   WiFi.softAP(ssid, password);
-  Serial.println(WiFi.softAPIP());
 
   // Async webserver setup
   server.on("/", HTTP_GET, handleRoot);
