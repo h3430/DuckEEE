@@ -1,17 +1,16 @@
 # DuckEEE
 
-Code structure
 
 Code structure
 ```plaintext
 EEE_Rover_Project/
-├── .pio                   # 
-├── .vsc        # Planning and designing resources
+├── .pio                
+├── .vsc       
 ├── data
 │   ├──assets
-│   │   ├──
-│   │   ├──
-│   ├──
+│   │   ├── nipple.min.js     # js package for joystick class
+│   │   ├── styles.css        # css styles
+│   ├── web_app.HTML
 ├── include 
 ├── lib               
 ├── src
