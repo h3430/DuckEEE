@@ -312,7 +312,7 @@ void handleRoot(AsyncWebServerRequest *req)
   req->send(SPIFFS, "/Joystick.html", "text/html");
 }
 
-void handleJoystick(AsyncWebServerRequest *req)
+void handleMotors(AsyncWebServerRequest *req)
 {
   motor_x_val = req->getParam("x")->value().toInt();
   motor_y_val = req->getParam("y")->value().toInt();
@@ -401,7 +401,7 @@ void setup()
   // Async webserver setup
   server.on("/", HTTP_GET, handleRoot);
   server.serveStatic("/assets", SPIFFS, "/assets/");
-  server.on("/joystick", HTTP_GET, handleJoystick);
+  server.on("/joystick", HTTP_GET, handleMotors);
   server.on("/read_data", HTTP_GET, handleReadData);
   server.begin();
 }

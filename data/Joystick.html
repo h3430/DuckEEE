@@ -5,46 +5,38 @@
   <meta charset="UTF-8">
   <title>ESP32_Rover_Control</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="assets/nipplejs.min.js"></script>
   <link rel="stylesheet" href="assets/styles.css">
+  <style>
+    /* Optional: show a small on‐screen hint */
+    .hint {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 1rem;
+      color: #555;
+    }
+  </style>
 </head>
 
 <body>
-
   <div class="main">
     <div class="container">
       <div class="panel left">
-          <div class="header">
-            <h1>ESP32_Rover_Control</h1>
-          </div>
-          <div class="joystick_wrapper">
-            <div id="joystickZone"></div>
-          </div>
-
-          <div class = "data"><div class="extra-table-wrapper">
-        <h3>Read_table</h3>
-          <table id="Extra_table">
-            <thead>
-              <tr>
-                <th>Radio</th>
-                <th>Infrared</th>
-                <th>Magnet</th>
-                <th>Species Best Match</th>
-                <th>Ultrasound(name)</th>
-              </tr>
-            </thead>
-            <tbody>
-            </tbody>
-          </table>
-      </div></div>
-          
-
+        <div class="header">
+          <h1>ESP32_Rover_Control</h1>
         </div>
+
+        <!-- Just a hint for the user; no clickable joystick is needed now -->
+        <div class="hint">
+          Use <strong>W</strong>/<strong>A</strong>/<strong>S</strong>/<strong>D</strong> to drive the rover.<br>
+          Hold <strong>Shift</strong> for top speed.
+        </div>
+      </div>
+
       <div class="panel right">
         <div class="data">
           <div class="controls">
-            <button class="button" id="Reset_Button" onclick="resetTable()">Reset Table</button>
-            <button class="button" id="Add_Button" onclick="add_to_read_table()">Add to Table</button>
+            <button class="button" id="Reset_Button" onclick="resetTable()">Reset!</button>
+            <button class="button" id="Read_Button" onclick="readButton()">Read!</button>
           </div>
           <table id="Data_table">
             <thead>
@@ -52,13 +44,11 @@
                 <th>Radio</th>
                 <th>Infrared</th>
                 <th>Magnet</th>
-                <th>Species Best Match</th>
+                <th>Species?</th>
                 <th>Ultrasound(name)</th>
               </tr>
             </thead>
-            <tbody>
-              <tr id="liveRow"><td colspan="5" style="text-align:center; color:gray;">Waiting for data...</td></tr>
-            </tbody>
+            <tbody></tbody>
           </table>
         </div>
       </div>
@@ -66,7 +56,13 @@
   </div>
 
   <script>
-    let latestData = {};
+    // Utility: send one fetch to the ESP32 for the given (x, y).
+    function sendJoystick(x, y) {
+      fetch(`/joystick?x=${x}&y=${y}`)
+        .then(res => res.text())
+        .then(text => console.log(`Sent x=${x}, y=${y} → Response:`, text))
+        .catch(err => console.error('Fetch error:', err));
+    }
 
     // Keep track of which WASD keys and Shift are currently held down.
     const keysDown = {
@@ -77,182 +73,125 @@
       shift: false
     };
 
-    const joystick = nipplejs.create({
-      zone: document.getElementById('joystickZone'),
-      mode: 'static',
-      position: { left: '50%', top: '50%' },
-      color: '#ffcc00',
-      size: 300
+    // Compute and send the current (x, y) based on keysDown.
+    function updateDirectionFromKeys() {
+      // Determine base speed: 255 if Shift is held, otherwise 100.
+      const baseSpeed = keysDown.shift ? 255 : 180;
+
+      // Compute raw directions: W→+1, S→-1; D→+1, A→-1.
+      let yDir = 0;
+      if (keysDown.w) yDir += 1;
+      if (keysDown.s) yDir -= 1;
+
+      let xDir = 0;
+      if (keysDown.d) xDir += 1;
+      if (keysDown.a) xDir -= 1;
+
+      let x = 0;
+      let y = 0;
+
+      // If both axes are nonzero (diagonal movement), give full speed to the Y axis
+      // and 60% of baseSpeed to the X axis.
+      if (yDir !== 0 && xDir !== 0) {
+        y = yDir * baseSpeed;
+        x = xDir * Math.round(baseSpeed * 0.7);
+      } else {
+        // Otherwise, apply full baseSpeed to whichever axis is active.
+        y = yDir * baseSpeed;
+        x = xDir * baseSpeed;
+      }
+
+      sendJoystick(x, y);
+    }
+
+    // Handle keydown events for WASD and Shift.
+    document.addEventListener('keydown', function (e) {
+      const key = e.key.toLowerCase();
+
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        // Prevent auto‐repeat spam for WASD keys.
+        if (!keysDown[key]) {
+          keysDown[key] = true;
+          updateDirectionFromKeys();
+        }
+        e.preventDefault(); // avoid page scrolling or other defaults
+      } else if (key === 'shift') {
+        // Track Shift separately; no need to prevent default.
+        if (!keysDown.shift) {
+          keysDown.shift = true;
+          updateDirectionFromKeys();
+        }
+      }
     });
 
+    // Handle keyup events for WASD and Shift.
+    document.addEventListener('keyup', function (e) {
+      const key = e.key.toLowerCase();
 
-    function add_to_read_table(){
-      if (!latestData || Object.keys(latestData).length === 0) return;
-      //creates row and adds the data
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${latestData.radio ?? '-'}</td>
-        <td>${latestData.infared ?? '-'}</td>
-        <td>${latestData.magnetic ?? '-'}</td>
-        <td>${latestData.species ?? '-'}</td>
-        <td>${latestData.name ?? '-'}</td>
-      `;
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        keysDown[key] = false;
+        updateDirectionFromKeys();
+        e.preventDefault();
+      } else if (key === 'shift') {
+        keysDown.shift = false;
+        updateDirectionFromKeys();
+      }
+    });
 
-      const table = document.querySelector("#Extra_table tbody");
-      table.prepend(row);
-      
-    }
+    // If the window loses focus, treat it like “all keys up”
+    window.addEventListener('blur', () => {
+      let anyChanged = false;
+      for (let k of ['w', 'a', 's', 'd', 'shift']) {
+        if (keysDown[k]) {
+          keysDown[k] = false;
+          anyChanged = true;
+        }
+      }
+      if (anyChanged) updateDirectionFromKeys();
+    });
 
-    function updateLiveRow(data) {
-      addCurrentData();
-      const liveRow = document.getElementById("liveRow");
-      liveRow.innerHTML = `
-        <td>${data.radio ?? '-'}</td>
-        <td>${data.infared ?? '-'}</td>
-        <td>${data.magnetic ?? '-'}</td>
-        <td>${data.species ?? '-'}</td>
-        <td>${data.name ?? '-'}</td>
-      `;
-    }
-
-    function fetchLiveData() {
+    // Your existing table‐reading logic (unchanged):
+    function readButton() {
       fetch('/read_data')
         .then(response => response.text())
         .then(queryString => {
           const params = new URLSearchParams(queryString);
-          latestData = {
-            radio: params.get('radio'),
-            infared: params.get('infared'),
-            magnetic: params.get('magnetic'),
-            species: params.get('species'),
-            name: params.get('name')
-          };
-          updateLiveRow(latestData);
+
+          const radio = params.get('radio');
+          const infared = params.get('infared');
+          const magnetic = params.get('magnetic');
+          const species = params.get('species');
+          const name = params.get('name');
+
+          console.log('Radio:', radio);
+          console.log('Infared:', infared);
+          console.log('Magnetic:', magnetic);
+          console.log('Species:', species);
+          console.log('Name:', name);
+
+          const table = document.querySelector("#Data_table tbody");
+          const row = document.createElement("tr");
+
+          row.innerHTML = `
+            <td>${radio}</td>
+            <td>${infared}</td>
+            <td>${magnetic}</td>
+            <td>${species}</td>
+            <td>${name}</td>
+          `;
+          table.prepend(row);
+          console.log('Table row added!');
         })
         .catch(error => {
-          console.error('Error fetching live data:', error);
+          console.error('Error:', error);
         });
-    }
-
-    function addCurrentData() {
-      if (!latestData || Object.keys(latestData).length === 0) return;
-      //creates row and adds the data
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${latestData.radio ?? '-'}</td>
-        <td>${latestData.infared ?? '-'}</td>
-        <td>${latestData.magnetic ?? '-'}</td>
-        <td>${latestData.species ?? '-'}</td>
-        <td>${latestData.name ?? '-'}</td>
-      `;
-      const table = document.querySelector("#Data_table tbody");
-      table.insertBefore(row, document.getElementById("liveRow").nextSibling);
     }
 
     function resetTable() {
       const tbody = document.querySelector("#Data_table tbody");
-      tbody.innerHTML = `<tr id="liveRow"><td colspan="5" style="text-align:center; color:gray;">Waiting for data...</td></tr>`;
+      tbody.innerHTML = ''; // Removes all rows
       console.log('Table reset!');
     }
-
-    function send_joystick(x, y) {
-      fetch(`/joystick?x=${x}&y=${y}`);
-    }
-
-    joystick.on('move', function (evt, data) {
-      if (data && data.vector) {
-        const x = Math.round(data.vector.x * 255);
-        const y = Math.round(data.vector.y * 255);
-        sendJoystick(x, y) 
-      }
-
-    });
-
-  
-    // similar decoding to the joystick 
-    function update_direction() {
-      // Speed constants
-      const forward_speed = 150;
-      const turn_rate = 225;
-      const turn_rate_boost = 255;
-      const forward_speed_boost = 255;
-
-
- 
-      let forward_direction = 0;
-      if (keysDown.w) forward_direction += 1;
-      if (keysDown.s) forward_direction -= 1;
-
-      let right_direction = 0;
-      if (keysDown.d) right_direction += 1;
-      if (keysDown.a) right_direction -= 1;
-
-      //these are from the old joystick handling
-      let x = 0;
-      let y = 0;
-
-      if(keysDown.shift){
-        y = forward_direction * forward_speed_boost;
-        x = right_direction * turn_rate_boost;
-      }
-      else{
-        y = forward_direction * forward_speed;
-        x = right_direction * turn_rate;
-      }
-      
-      send_joystick(x, y);
-    }
-
-
-    //event listeners for the keyboard controls
-
-    document.addEventListener('keydown', function (e) {
-      const key = e.key.toLowerCase();
-      if (['w', 'a', 's', 'd'].includes(key)) {
-        if (!keysDown[key]) {
-          keysDown[key] = true;
-          update_direction();
-        }
-      } else if (key === 'shift') {
-        if (!keysDown.shift) {
-          keysDown.shift = true;
-          update_direction();
-        }
-      }
-    });
-
-    document.addEventListener('keyup', function (e) {
-      const key = e.key.toLowerCase();
-      if (['w', 'a', 's', 'd'].includes(key)) {
-        keysDown[key] = false;
-        update_direction();
-      } else if (key === 'shift') {
-        keysDown.shift = false;
-        update_direction();
-      }
-    });
-
-    joystick.on('end', function () {
-      const interval = setInterval(() => {
-        sendJoystick(0, 0) 
-          .then(res => res.text())
-          .then(text => {
-            console.log("Response:", text);
-            if (text.includes("stopped")) {
-              clearInterval(interval);
-            }
-          })
-          .catch(err => {
-            console.error("Fetch error:", err);
-            clearInterval(interval);
-          });
-      }, 50);
-    });
-
-    window.addEventListener('load', () => {
-      fetchLiveData(); 
-      setInterval(fetchLiveData, 1000); 
-    });
   </script>
 </body>
 
