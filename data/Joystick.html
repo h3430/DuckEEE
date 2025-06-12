@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32_Rover_Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="assets/nipplejs.min.js"></script>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+
+<body>
+
+  <div class="main">
+    <div class="container">
+      <div class="panel left">
+          <div class="header">
+            <h1>ESP32_Rover_Control</h1>
+          </div>
+          <div class="joystick_wrapper">
+            <div id="joystickZone"></div>
+          </div>
+
+          <div class = "data"><div class="extra-table-wrapper">
+        <h3>Read_table</h3>
+          <table id="Extra_table">
+            <thead>
+              <tr>
+                <th>Radio</th>
+                <th>Infrared</th>
+                <th>Magnet</th>
+                <th>Species Best Match</th>
+                <th>Ultrasound(name)</th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+      </div></div>
+          
+
+        </div>
+      <div class="panel right">
+        <div class="data">
+          <div class="controls">
+            <button class="button" id="Reset_Button" onclick="resetTable()">Reset Table</button>
+            <button class="button" id="Add_Button" onclick="add_to_read_table()">Add to Table</button>
+          </div>
+          <table id="Data_table">
+            <thead>
+              <tr>
+                <th>Radio</th>
+                <th>Infrared</th>
+                <th>Magnet</th>
+                <th>Species Best Match</th>
+                <th>Ultrasound(name)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr id="liveRow"><td colspan="5" style="text-align:center; color:gray;">Waiting for data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let latestData = {};
+
+    // Keep track of which WASD keys and Shift are currently held down.
+    const keysDown = {
+      w: false,
+      a: false,
+      s: false,
+      d: false,
+      shift: false
+    };
+
+    const joystick = nipplejs.create({
+      zone: document.getElementById('joystickZone'),
+      mode: 'static',
+      position: { left: '50%', top: '50%' },
+      color: '#ffcc00',
+      size: 300
+    });
+
+
+    function add_to_read_table(){
+      if (!latestData || Object.keys(latestData).length === 0) return;
+      //creates row and adds the data
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${latestData.radio ?? '-'}</td>
+        <td>${latestData.infared ?? '-'}</td>
+        <td>${latestData.magnetic ?? '-'}</td>
+        <td>${latestData.species ?? '-'}</td>
+        <td>${latestData.name ?? '-'}</td>
+      `;
+
+      const table = document.querySelector("#Extra_table tbody");
+      table.prepend(row);
+      
+    }
+
+    function updateLiveRow(data) {
+      addCurrentData();
+      const liveRow = document.getElementById("liveRow");
+      liveRow.innerHTML = `
+        <td>${data.radio ?? '-'}</td>
+        <td>${data.infared ?? '-'}</td>
+        <td>${data.magnetic ?? '-'}</td>
+        <td>${data.species ?? '-'}</td>
+        <td>${data.name ?? '-'}</td>
+      `;
+    }
+
+    function fetchLiveData() {
+      fetch('/read_data')
+        .then(response => response.text())
+        .then(queryString => {
+          const params = new URLSearchParams(queryString);
+          latestData = {
+            radio: params.get('radio'),
+            infared: params.get('infared'),
+            magnetic: params.get('magnetic'),
+            species: params.get('species'),
+            name: params.get('name')
+          };
+          updateLiveRow(latestData);
+        })
+        .catch(error => {
+          console.error('Error fetching live data:', error);
+        });
+    }
+
+    function addCurrentData() {
+      if (!latestData || Object.keys(latestData).length === 0) return;
+      //creates row and adds the data
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${latestData.radio ?? '-'}</td>
+        <td>${latestData.infared ?? '-'}</td>
+        <td>${latestData.magnetic ?? '-'}</td>
+        <td>${latestData.species ?? '-'}</td>
+        <td>${latestData.name ?? '-'}</td>
+      `;
+      const table = document.querySelector("#Data_table tbody");
+      table.insertBefore(row, document.getElementById("liveRow").nextSibling);
+    }
+
+    function resetTable() {
+      const tbody = document.querySelector("#Data_table tbody");
+      tbody.innerHTML = `<tr id="liveRow"><td colspan="5" style="text-align:center; color:gray;">Waiting for data...</td></tr>`;
+      console.log('Table reset!');
+    }
+
+    function send_joystick(x, y) {
+      fetch(`/joystick?x=${x}&y=${y}`);
+    }
+
+    joystick.on('move', function (evt, data) {
+      if (data && data.vector) {
+        const x = Math.round(data.vector.x * 255);
+        const y = Math.round(data.vector.y * 255);
+        sendJoystick(x, y) 
+      }
+
+    });
+
+  
+    // similar decoding to the joystick 
+    function update_direction() {
+      // Speed constants
+      const forward_speed = 150;
+      const turn_rate = 225;
+      const turn_rate_boost = 255;
+      const forward_speed_boost = 255;
+
+
+ 
+      let forward_direction = 0;
+      if (keysDown.w) forward_direction += 1;
+      if (keysDown.s) forward_direction -= 1;
+
+      let right_direction = 0;
+      if (keysDown.d) right_direction += 1;
+      if (keysDown.a) right_direction -= 1;
+
+      //these are from the old joystick handling
+      let x = 0;
+      let y = 0;
+
+      if(keysDown.shift){
+        y = forward_direction * forward_speed_boost;
+        x = right_direction * turn_rate_boost;
+      }
+      else{
+        y = forward_direction * forward_speed;
+        x = right_direction * turn_rate;
+      }
+      
+      send_joystick(x, y);
+    }
+
+
+    //event listeners for the keyboard controls
+
+    document.addEventListener('keydown', function (e) {
+      const key = e.key.toLowerCase();
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        if (!keysDown[key]) {
+          keysDown[key] = true;
+          update_direction();
+        }
+      } else if (key === 'shift') {
+        if (!keysDown.shift) {
+          keysDown.shift = true;
+          update_direction();
+        }
+      }
+    });
+
+    document.addEventListener('keyup', function (e) {
+      const key = e.key.toLowerCase();
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        keysDown[key] = false;
+        update_direction();
+      } else if (key === 'shift') {
+        keysDown.shift = false;
+        update_direction();
+      }
+    });
+
+    joystick.on('end', function () {
+      const interval = setInterval(() => {
+        sendJoystick(0, 0) 
+          .then(res => res.text())
+          .then(text => {
+            console.log("Response:", text);
+            if (text.includes("stopped")) {
+              clearInterval(interval);
+            }
+          })
+          .catch(err => {
+            console.error("Fetch error:", err);
+            clearInterval(interval);
+          });
+      }, 50);
+    });
+
+    window.addEventListener('load', () => {
+      fetchLiveData(); 
+      setInterval(fetchLiveData, 1000); 
+    });
+  </script>
+</body>
+
+</html>
